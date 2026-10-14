@@ -4,31 +4,47 @@ import { ArrowRight, Check, Eye, EyeOff, LockKeyhole, Mail, Sparkles } from "luc
 import { FormEvent, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 
-export function AuthScreen() {
+export function AuthScreen({ hidden = false }: { hidden?: boolean }) {
   const [mode, setMode] = useState<"signIn" | "signUp">("signIn");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [pending, setPending] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setSuccess("");
     setPending(true);
 
     try {
-      const result =
-        mode === "signUp"
-          ? await authClient.signUp.email({ name: name.trim(), email: email.trim(), password })
-          : await authClient.signIn.email({ email: email.trim(), password });
+      if (mode === "signUp") {
+        const result = await authClient.signUp.email({
+          name: name.trim(),
+          email: email.trim(),
+          password,
+        });
 
+        if (result.error) {
+          setError(result.error.message ?? "We couldn't create your account. Check your details and try again.");
+          return;
+        }
+
+        setMode("signIn");
+        setPassword("");
+        setSuccess("Your account is ready. Sign in with your email and password to continue.");
+        return;
+      }
+
+      const result = await authClient.signIn.email({ email: email.trim(), password });
       if (result.error) {
         setError(result.error.message ?? "We couldn't sign you in. Check your details and try again.");
       }
     } catch {
-      setError("We couldn't reach the account service. Check your MongoDB connection and try again.");
+      setError("We couldn't reach the account service. Check your connection and try again.");
     } finally {
       setPending(false);
     }
@@ -36,11 +52,12 @@ export function AuthScreen() {
 
   function changeMode(nextMode: "signIn" | "signUp") {
     setError("");
+    setSuccess("");
     setMode(nextMode);
   }
 
   return (
-    <main className="auth-shell">
+    <main className="auth-shell" hidden={hidden}>
       <section className="auth-story">
         <a className="brand auth-brand" href="#" aria-label="Daymark home">
           <span className="brand-mark"><Sparkles size={17} strokeWidth={2.3} /></span>
@@ -90,6 +107,7 @@ export function AuthScreen() {
               <span>Password <small>{mode === "signUp" ? "At least 12 characters" : ""}</small></span>
               <div className="auth-input-wrap"><LockKeyhole size={16} /><input type={showPassword ? "text" : "password"} autoComplete={mode === "signUp" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === "signUp" ? "Create a strong password" : "Enter your password"} required minLength={mode === "signUp" ? 12 : 1} maxLength={128} /><button className="password-toggle" type="button" aria-label={showPassword ? "Hide password" : "Show password"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div>
             </label>
+            {success && <p className="auth-success" role="status">{success}</p>}
             {error && <p className="auth-error" role="alert">{error}</p>}
             <button className="auth-submit" type="submit" disabled={pending}>
               {pending ? "One moment..." : mode === "signIn" ? "Sign in to Daymark" : "Create my account"}

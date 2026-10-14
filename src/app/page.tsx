@@ -8,10 +8,12 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  CircleAlert,
   CircleHelp,
   Clock3,
   Filter,
   LayoutDashboard,
+  LogOut,
   MapPin,
   MoreHorizontal,
   Plus,
@@ -20,7 +22,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AuthScreen } from "@/app/auth-screen";
 import { authClient } from "@/lib/auth-client";
 import { applicationStages, type ApplicationStage } from "@/lib/applications";
@@ -118,7 +120,22 @@ function Dashboard({ user }: { user: { name: string; email: string } }) {
   const [editing, setEditing] = useState<Application | null>(null);
   const [form, setForm] = useState(blankApplication);
   const [notice, setNotice] = useState("");
+  const [noticeType, setNoticeType] = useState<"success" | "error">("success");
   const [saving, setSaving] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [signOutPending, setSignOutPending] = useState(false);
+  const noticeTimer = useRef<number | null>(null);
+
+  const showNotice = useCallback((message: string, type: "success" | "error") => {
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    setNotice(message);
+    setNoticeType(type);
+    noticeTimer.current = window.setTimeout(() => setNotice(""), type === "success" ? 2800 : 6000);
+  }, []);
+
+  useEffect(() => () => {
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,14 +148,14 @@ function Dashboard({ user }: { user: { name: string; email: string } }) {
       } catch (error) {
         console.error("Unable to load this user's applications.");
         if (!cancelled) {
-          setNotice(error instanceof Error ? error.message : "Applications could not be loaded.");
+          showNotice(error instanceof Error ? error.message : "Applications could not be loaded.", "error");
         }
       } finally {
         if (!cancelled) setLoadingApplications(false);
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [showNotice]);
 
   const filteredApplications = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -225,7 +242,7 @@ function Dashboard({ user }: { user: { name: string; email: string } }) {
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        setNotice(await responseError(response, "The application could not be saved."));
+        showNotice(await responseError(response, "The application could not be saved."), "error");
         return;
       }
       const saved = (await response.json()) as ApplicationRecord;
@@ -240,11 +257,10 @@ function Dashboard({ user }: { user: { name: string; email: string } }) {
           : [savedApplication, ...current],
       );
       setModalOpen(false);
-      setNotice(editing ? "Application updated." : "Application added.");
-      window.setTimeout(() => setNotice(""), 2800);
+      showNotice(editing ? "Application updated." : "Application added.", "success");
     } catch {
       console.error("Unable to save this user's application.");
-      setNotice("The application could not be saved. Check your connection and try again.");
+      showNotice("The application could not be saved. Check your connection and try again.", "error");
     } finally {
       setSaving(false);
     }
@@ -257,15 +273,14 @@ function Dashboard({ user }: { user: { name: string; email: string } }) {
     try {
       const response = await fetch(`/api/applications/${application.id}`, { method: "DELETE" });
       if (!response.ok) {
-        setNotice(await responseError(response, "The application could not be removed."));
+        showNotice(await responseError(response, "The application could not be removed."), "error");
         return;
       }
       setApplications((current) => current.filter((item) => item.id !== application.id));
-      setNotice("Application removed.");
-      window.setTimeout(() => setNotice(""), 2800);
+      showNotice("Application removed.", "success");
     } catch {
       console.error("Unable to delete this user's application.");
-      setNotice("The application could not be removed. Check your connection and try again.");
+      showNotice("The application could not be removed. Check your connection and try again.", "error");
     }
   }
 
@@ -277,25 +292,33 @@ function Dashboard({ user }: { user: { name: string; email: string } }) {
         body: JSON.stringify({ ...application, stage }),
       });
       if (!response.ok) {
-        setNotice(await responseError(response, "The application stage could not be updated."));
+        showNotice(await responseError(response, "The application stage could not be updated."), "error");
         return;
       }
       setApplications((current) =>
         current.map((item) => (item.id === application.id ? { ...item, stage } : item)),
       );
+      showNotice("Application stage updated.", "success");
     } catch {
       console.error("Unable to update this user's application stage.");
-      setNotice("The application stage could not be updated. Check your connection and try again.");
+      showNotice("The application stage could not be updated. Check your connection and try again.", "error");
     }
   }
 
   async function signOut() {
+    setSignOutPending(true);
     try {
       const result = await authClient.signOut();
-      if (result.error) setNotice("You could not be signed out. Please try again.");
+      if (result.error) {
+        showNotice(result.error.message ?? "You could not be signed out. Please try again.", "error");
+        setSignOutPending(false);
+        return;
+      }
+      setAccountMenuOpen(false);
     } catch {
       console.error("Unable to end the current session.");
-      setNotice("You could not be signed out. Please try again.");
+      showNotice("You could not be signed out. Please try again.", "error");
+      setSignOutPending(false);
     }
   }
 
@@ -330,9 +353,9 @@ function Dashboard({ user }: { user: { name: string; email: string } }) {
           <strong>Little by little.</strong>
           <p>Every application is a step closer to your next chapter.</p>
         </div>
-        <button className="profile-button" type="button" onClick={() => void signOut()} title="Sign out">
+        <button className="profile-button" type="button" onClick={() => setAccountMenuOpen((open) => !open)} aria-expanded={accountMenuOpen} aria-haspopup="menu">
           <span className="profile-avatar">{makeInitials(user.name || user.email).slice(0, 2)}</span>
-          <span className="profile-copy"><strong>{user.name || "Your workspace"}</strong><small>{user.email}</small></span>
+          <span className="profile-copy"><strong>{user.name || "Your workspace"}</strong><small>Account menu</small></span>
           <MoreHorizontal size={19} className="profile-more" />
         </button>
       </aside>
@@ -346,11 +369,23 @@ function Dashboard({ user }: { user: { name: string; email: string } }) {
               <CircleHelp size={18} />
             </button>
             <button className="icon-button" aria-label="Notifications"><Bell size={18} /><i /></button>
-            <button className="top-avatar top-avatar-button" type="button" onClick={() => void signOut()} aria-label="Sign out" title={`Sign out ${user.email}`}>
+            <button className="top-avatar top-avatar-button" type="button" onClick={() => setAccountMenuOpen((open) => !open)} aria-label="Open account menu" aria-expanded={accountMenuOpen} aria-haspopup="menu" title={user.email}>
               {makeInitials(user.name || user.email).slice(0, 2)}
             </button>
           </div>
         </header>
+        {accountMenuOpen && (
+          <div className="account-menu" role="menu" aria-label="Account menu">
+            <div className="account-menu-user">
+              <span className="profile-avatar">{makeInitials(user.name || user.email).slice(0, 2)}</span>
+              <span><strong>{user.name || "Your account"}</strong><small>{user.email}</small></span>
+            </div>
+            <button type="button" role="menuitem" onClick={() => void signOut()} disabled={signOutPending}>
+              <LogOut size={16} />
+              {signOutPending ? "Signing out…" : "Sign out"}
+            </button>
+          </div>
+        )}
 
         <div className="page-content">
           <div className="greeting-row">
@@ -484,7 +519,12 @@ function Dashboard({ user }: { user: { name: string; email: string } }) {
         </div>
       </section>
 
-      {notice && <div className="toast" role="status"><Check size={16} />{notice}</div>}
+      {notice && (
+        <div className={`toast toast-${noticeType}`} role={noticeType === "error" ? "alert" : "status"}>
+          {noticeType === "error" ? <CircleAlert size={16} /> : <Check size={16} />}
+          {notice}
+        </div>
+      )}
 
       {modalOpen && (
         <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setModalOpen(false); }}>
@@ -519,10 +559,16 @@ function Dashboard({ user }: { user: { name: string; email: string } }) {
 export default function Home() {
   const { data: session, isPending } = authClient.useSession();
 
-  if (isPending) {
-    return <main className="auth-loading"><span className="brand-mark"><Sparkles size={17} /></span><span>Preparing your private workspace…</span></main>;
-  }
-
-  if (!session) return <AuthScreen />;
-  return <Dashboard user={{ name: session.user.name, email: session.user.email }} />;
+  return (
+    <>
+      <main className="auth-loading" hidden={!isPending}>
+        <span className="brand-mark"><Sparkles size={17} /></span>
+        <span>Preparing your private workspace…</span>
+      </main>
+      <AuthScreen hidden={isPending || Boolean(session)} />
+      {!isPending && session && (
+        <Dashboard user={{ name: session.user.name, email: session.user.email }} />
+      )}
+    </>
+  );
 }
